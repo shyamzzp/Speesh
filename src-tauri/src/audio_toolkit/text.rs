@@ -332,6 +332,22 @@ mod tests {
     }
 
     #[test]
+    fn test_apply_custom_words_preserves_ampersand() {
+        // Regression for #1558: a custom word containing an ampersand (e.g.
+        // "R&D") must be storable and must match the transcription token intact.
+        // `build_ngram` keeps interior punctuation, so once the save path stops
+        // stripping "&", the exact token matches and is returned verbatim.
+        let custom_words = vec!["R&D".to_string()];
+        let result = apply_custom_words("i work in R&D", &custom_words, 0.3);
+        assert_eq!(result, "i work in R&D");
+
+        // A stripped custom word ("RD") would NOT reproduce "R&D" from the
+        // spoken token — this is exactly the broken pre-fix behavior.
+        let stripped = vec!["RD".to_string()];
+        assert_ne!(apply_custom_words("i work in R&D", &stripped, 0.3), "i work in R&D");
+    }
+
+    #[test]
     fn test_apply_custom_words_fuzzy_match() {
         let text = "helo wrold";
         let custom_words = vec!["hello".to_string(), "world".to_string()];

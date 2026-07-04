@@ -443,6 +443,7 @@ impl ShortcutAction for TranscribeAction {
         let rm = app.state::<Arc<AudioRecordingManager>>();
 
         // Load ASR model and VAD model in parallel
+        let kickoff_started = Instant::now();
         tm.initiate_model_load();
         let rm_clone = Arc::clone(&rm);
         std::thread::spawn(move || {
@@ -450,11 +451,15 @@ impl ShortcutAction for TranscribeAction {
                 debug!("VAD pre-load failed: {}", e);
             }
         });
+        let kickoff_elapsed = kickoff_started.elapsed();
 
         let binding_id = binding_id.to_string();
+        let tray_started = Instant::now();
         change_tray_icon(app, TrayIconState::Recording);
+        let tray_elapsed = tray_started.elapsed();
 
         // Get the microphone mode to determine audio feedback timing
+        let plan_started = Instant::now();
         let settings = get_settings(app);
         let is_always_on = settings.always_on_microphone;
 
@@ -476,18 +481,38 @@ impl ShortcutAction for TranscribeAction {
         } else {
             VadPolicy::Offline
         };
+        // Live typing injects transcription into the focused input at the cursor
+        // as it streams. Only for streaming models, and not with post-processing
+        // (LLM rewrites can't be applied to already-typed, append-only text).
+        let live_typing = settings.live_typing && !self.post_process;
         if model_supports_streaming {
+            tm.arm_live_typing(live_typing);
             tm.start_stream();
         }
+        let plan_elapsed = plan_started.elapsed();
 
         // Sizing the overlay follows the same advertised capability. A model that
         // doesn't stream (or whose capability is not known yet) gets the compact
-        // pill instead of an oversized transparent live window.
+        // pill instead of an oversized transparent live window. With live typing
+        // the text goes into the input directly, so skip the live text panel and
+        // show the compact pill for feedback only.
+        let overlay_started = Instant::now();
         match settings.overlay_style {
-            OverlayStyle::Live if model_supports_streaming => utils::show_streaming_overlay(app),
+            OverlayStyle::Live if model_supports_streaming && !live_typing => {
+                utils::show_streaming_overlay(app)
+            }
             OverlayStyle::Live | OverlayStyle::Minimal => show_recording_overlay(app),
             OverlayStyle::None => {} // show_overlay_state no-ops on None anyway
         }
+        // Everything above runs before capture can begin, so each span here is
+        // added keypress->capture latency.
+        debug!(
+            "start-path pre-recording steps: model_kickoff={:?} tray={:?} settings+stream_plan={:?} overlay={:?}",
+            kickoff_elapsed,
+            tray_elapsed,
+            plan_elapsed,
+            overlay_started.elapsed()
+        );
         debug!("Microphone mode - always_on: {}", is_always_on);
 
         let mut recording_error: Option<String> = None;
@@ -635,7 +660,7 @@ impl ShortcutAction for TranscribeAction {
                 } else {
                     // Save WAV concurrently with transcription
                     let sample_count = samples.len();
-                    let file_name = format!("handy-{}.wav", chrono::Utc::now().timestamp());
+                    let file_name = format!("speesh-{}.wav", chrono::Utc::now().timestamp());
                     let wav_path = hm.recordings_dir().join(&file_name);
                     let wav_path_for_verify = wav_path.clone();
                     let samples_for_wav = samples.clone();
@@ -732,6 +757,12 @@ impl ShortcutAction for TranscribeAction {
                             if processed.final_text.is_empty() {
                                 utils::hide_recording_overlay(&ah);
                                 change_tray_icon(&ah, TrayIconState::Idle);
+                            } else if tm.did_live_type() {
+                                // Text was already typed into the focused input at
+                                // the cursor as it streamed; do not paste it again.
+                                debug!("Live typing handled output; skipping paste");
+                                utils::hide_recording_overlay(&ah);
+                                change_tray_icon(&ah, TrayIconState::Idle);
                             } else {
                                 let ah_clone = ah.clone();
                                 let paste_time = Instant::now();
@@ -777,7 +808,7 @@ impl ShortcutAction for TranscribeAction {
 
                             error!("Transcription failed: {}", err);
                             // Surface the failure to the UI (toast). The full
-                            // message is also in handy.log via the line above.
+                            // message is also in speesh.log via the line above.
                             let _ = ah.emit("transcription-error", err.to_string());
                             // Save entry with empty text so user can retry
                             if wav_saved {

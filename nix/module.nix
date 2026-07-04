@@ -1,4 +1,4 @@
-# NixOS module for Handy speech-to-text
+# NixOS module for Speesh speech-to-text
 #
 # Handles system-level configuration that the package wrapper cannot:
 #   - udev rule for /dev/uinput (rdev grab() needs it for virtual input)
@@ -7,12 +7,12 @@
 #
 # Usage in your flake:
 #
-#   inputs.handy.url = "github:cjpais/Handy";
+#   inputs.speesh.url = "github:shyamzzp/Speesh";
 #
 #   nixosConfigurations.myhost = nixpkgs.lib.nixosSystem {
 #     modules = [
-#       handy.nixosModules.default
-#       { programs.handy.enable = true; }
+#       speesh.nixosModules.default
+#       { programs.speesh.enable = true; }
 #     ];
 #   };
 {
@@ -22,16 +22,16 @@
   ...
 }:
 let
-  cfg = config.programs.handy;
+  cfg = config.programs.speesh;
 in
 {
-  options.programs.handy = {
-    enable = lib.mkEnableOption "Handy offline speech-to-text";
+  options.programs.speesh = {
+    enable = lib.mkEnableOption "Speesh offline speech-to-text";
 
     package = lib.mkOption {
       type = lib.types.package;
-      defaultText = lib.literalExpression "handy.packages.\${system}.handy";
-      description = "The Handy package to use.";
+      defaultText = lib.literalExpression "speesh.packages.\${system}.speesh";
+      description = "The Speesh package to use.";
     };
   };
 

@@ -249,6 +249,13 @@ pub struct TranscriptionManager {
     /// `is_model_loaded()` consults this so the model still reports "loaded"
     /// while the worker holds it.
     active_engine_lease: Arc<AtomicU64>,
+    /// Armed by the action before `start_stream` when live typing should inject
+    /// the transcription into the focused input as it streams (streaming model,
+    /// no post-process). Read once by the worker.
+    live_typing_armed: Arc<AtomicBool>,
+    /// Set by the worker once it has typed any text into the focused field, so
+    /// the action knows to skip the final paste (text is already at the cursor).
+    did_live_type: Arc<AtomicBool>,
 }
 
 impl TranscriptionManager {
@@ -269,6 +276,8 @@ impl TranscriptionManager {
             next_stream_worker_id: Arc::new(AtomicU64::new(1)),
             active_stream_worker: Arc::new(AtomicU64::new(0)),
             active_engine_lease: Arc::new(AtomicU64::new(0)),
+            live_typing_armed: Arc::new(AtomicBool::new(false)),
+            did_live_type: Arc::new(AtomicBool::new(false)),
         };
 
         // Start the idle watcher
@@ -741,6 +750,50 @@ impl TranscriptionManager {
         self.stream_active.load(Ordering::Acquire)
     }
 
+    /// Arm (or disarm) live typing for the next stream and clear the
+    /// "already typed" flag. Called by the action right before `start_stream`.
+    pub fn arm_live_typing(&self, enabled: bool) {
+        self.live_typing_armed.store(enabled, Ordering::Release);
+        self.did_live_type.store(false, Ordering::Release);
+    }
+
+    /// True if the last/current stream typed text directly into the focused
+    /// field, so the caller should not paste the finalized text again.
+    pub fn did_live_type(&self) -> bool {
+        self.did_live_type.load(Ordering::Acquire)
+    }
+
+    /// Type the newly-committed suffix into the focused input. Append-only: only
+    /// emits when `committed` extends what was already typed (LocalAgreement
+    /// commits grow a stable prefix), so no backspaces are ever sent into a
+    /// foreign field. `typed` tracks the text emitted so far for this stream.
+    fn inject_committed(&self, committed: &str, typed: &mut String) {
+        if committed.len() > typed.len() && committed.starts_with(typed.as_str()) {
+            let delta = committed[typed.len()..].to_string();
+            *typed = committed.to_string();
+            self.type_text_at_cursor(delta);
+        }
+    }
+
+    /// Simulate keystrokes for `text` at the current cursor via the shared Enigo
+    /// instance, on the main thread (required on macOS).
+    fn type_text_at_cursor(&self, text: String) {
+        if text.is_empty() {
+            return;
+        }
+        self.did_live_type.store(true, Ordering::Release);
+        let app = self.app_handle.clone();
+        let _ = self.app_handle.run_on_main_thread(move || {
+            if let Some(state) = app.try_state::<crate::input::EnigoState>() {
+                if let Ok(mut enigo) = state.0.lock() {
+                    if let Err(e) = crate::input::paste_text_direct(&mut enigo, &text) {
+                        warn!("Live typing failed to inject text: {}", e);
+                    }
+                }
+            }
+        });
+    }
+
     /// Shared handle to the stream router, used by the audio recorder to feed
     /// real-time frames without going through Tauri state on every frame.
     pub fn stream_router(&self) -> Arc<StreamRouter> {
@@ -923,6 +976,10 @@ impl TranscriptionManager {
                 model_id, backend
             );
 
+            let live_typing = self.live_typing_armed.load(Ordering::Acquire);
+            // Text already typed into the focused field this stream (append-only).
+            let mut typed = String::new();
+
             let mut perf = StreamPerf::new();
             while let Ok(cmd) = rx.recv() {
                 match cmd {
@@ -943,6 +1000,9 @@ impl TranscriptionManager {
                                     let text = stream.text();
                                     perf.record_emit();
                                     self.emit_stream_text(&text.committed, &text.tentative);
+                                    if live_typing && update.committed_changed {
+                                        self.inject_committed(&text.committed, &mut typed);
+                                    }
                                 }
                                 perf.maybe_log();
                             }
@@ -965,7 +1025,12 @@ impl TranscriptionManager {
                                     update.audio_committed_ms,
                                     update.buffered_ms,
                                 );
-                                Some(stream.text().display())
+                                let t = stream.text();
+                                if live_typing {
+                                    // committed now holds the full text; type the tail.
+                                    self.inject_committed(&t.committed, &mut typed);
+                                }
+                                Some(t.display())
                             }
                             Err(e) => {
                                 perf.record_compute(finalize_start.elapsed());
@@ -1093,9 +1158,9 @@ impl TranscriptionManager {
 
     pub fn transcribe(&self, audio: Vec<f32>) -> Result<String> {
         #[cfg(debug_assertions)]
-        if std::env::var("HANDY_FORCE_TRANSCRIPTION_FAILURE").is_ok() {
+        if std::env::var("SPEESH_FORCE_TRANSCRIPTION_FAILURE").is_ok() {
             return Err(anyhow::anyhow!(
-                "Simulated transcription failure (HANDY_FORCE_TRANSCRIPTION_FAILURE)"
+                "Simulated transcription failure (SPEESH_FORCE_TRANSCRIPTION_FAILURE)"
             ));
         }
 
@@ -1233,7 +1298,7 @@ impl TranscriptionManager {
                             // Whisper-family long-form (>30s) decode degenerates into a
                             // repetition loop when an initial prompt is set AND timestamps
                             // are off — a shared whisper.cpp behavior (verified: whisper.cpp
-                            // collapses in the same prompt + no-timestamps cell). Handy runs
+                            // collapses in the same prompt + no-timestamps cell). Speesh runs
                             // whisper.cpp with timestamps on, so request segment timestamps
                             // here too for parity, which keeps multi-window decode stable.
                             // Only whisper advertises InitialPrompt; other arches keep None.
@@ -1742,7 +1807,7 @@ fn resolve_device_index(index: usize) -> Result<(Backend, i32)> {
     Ok((backend, gpu_device))
 }
 
-/// Map Handy's whisper accelerator setting to a transcribe-cpp [`Backend`].
+/// Map Speesh's whisper accelerator setting to a transcribe-cpp [`Backend`].
 ///
 /// `Auto` lets the library pick the best device (with CPU fallback). `Cpu` forces
 /// strict CPU. `Gpu` requests the platform GPU backend, but only if a device for

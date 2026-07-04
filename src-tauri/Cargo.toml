@@ -1,11 +1,11 @@
 [package]
-name = "handy"
+name = "speesh"
 version = "0.9.0"
-description = "Handy"
+description = "Speesh"
 authors = ["cjpais"]
 edition = "2021"
 license = "MIT"
-default-run = "handy"
+default-run = "speesh"
 
 [profile.dev]
 incremental = true # Compile your binary in smaller steps.
@@ -16,7 +16,7 @@ incremental = true # Compile your binary in smaller steps.
 # The `_lib` suffix may seem redundant but it is necessary
 # to make the lib name unique and wouldn't conflict with the bin name.
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
-name = "handy_app_lib"
+name = "speesh_app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 # [[bin]]
@@ -73,7 +73,7 @@ sha2 = "0.10"
 # transcribe-rs is now ONNX-only (Parakeet, Moonshine, SenseVoice, GigaAM,
 # Canary, Cohere). Per-platform backend features are added in the target tables.
 transcribe-rs = { version = "0.3.8", features = ["onnx"] }
-transcribe-cpp = { version = "0.1.0", default-features = false }
+transcribe-cpp = { version = "0.1.1", default-features = false }
 handy-keys = "0.2.4"
 ferrous-opencc = "0.2.3"
 clap = { version = "4", features = ["derive"] }
@@ -122,26 +122,26 @@ winreg = "0.55"
 # buys nothing on ARM — ALL_VARIANTS is an x86 concept, so a DL build there is
 # just a single portable CPU module shipped as a DLL. So ARM links transcribe-cpp
 # STATICALLY (no features = static CPU-only): the one CPU backend is compiled into
-# handy.exe and we ship zero DLLs, which sidesteps the installer's per-DLL
+# speesh.exe and we ship zero DLLs, which sidesteps the installer's per-DLL
 # signtool verify entirely. CI pins -DGGML_NATIVE=OFF (see build.yml) so the
 # static build targets a portable ARM baseline, not the build runner's CPU.
 [target.'cfg(all(windows, target_arch = "x86_64"))'.dependencies]
-transcribe-cpp = { version = "0.1.0", default-features = false, features = [
+transcribe-cpp = { version = "0.1.1", default-features = false, features = [
   "dynamic-backends",
   "vulkan",
 ] }
 
 [target.'cfg(all(windows, target_arch = "aarch64"))'.dependencies]
-transcribe-cpp = { version = "0.1.0", default-features = false }
+transcribe-cpp = { version = "0.1.1", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2.1" }
-transcribe-cpp = { version = "0.1.0", default-features = false, features = ["metal"] }
+transcribe-cpp = { version = "0.1.1", default-features = false, features = ["metal"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk-layer-shell = { version = "0.8", features = ["v0_6"] }
 gtk = "0.18"
-transcribe-cpp = { version = "0.1.0", default-features = false, features = [
+transcribe-cpp = { version = "0.1.1", default-features = false, features = [
   "dynamic-backends",
   "vulkan",
 ] }

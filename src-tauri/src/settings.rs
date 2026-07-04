@@ -186,7 +186,7 @@ pub enum RecordingRetentionPeriod {
 #[serde(rename_all = "snake_case")]
 pub enum KeyboardImplementation {
     Tauri,
-    HandyKeys,
+    SpeeshKeys,
 }
 
 impl Default for KeyboardImplementation {
@@ -194,7 +194,7 @@ impl Default for KeyboardImplementation {
         #[cfg(target_os = "linux")]
         return KeyboardImplementation::Tauri;
         #[cfg(not(target_os = "linux"))]
-        return KeyboardImplementation::HandyKeys;
+        return KeyboardImplementation::SpeeshKeys;
     }
 }
 
@@ -319,7 +319,7 @@ impl std::ops::DerefMut for SecretMap {
     }
 }
 
-/* still handy for composing the initial JSON in the store ------------- */
+/* still speesh for composing the initial JSON in the store ------------- */
 #[derive(Serialize, Deserialize, Debug, Clone, Type)]
 pub struct AppSettings {
     /// Internal settings schema marker for one-time migrations. Fresh installs
@@ -438,6 +438,15 @@ pub struct AppSettings {
     /// `overlay_position` (position `none` → style `None`).
     #[serde(default = "default_overlay_style")]
     pub overlay_style: OverlayStyle,
+    /// When true (and a streaming-capable model is active, without post-process),
+    /// type the transcription into the focused input at the cursor as you speak,
+    /// instead of showing it in the overlay and pasting once at the end.
+    #[serde(default = "default_live_typing")]
+    pub live_typing: bool,
+}
+
+fn default_live_typing() -> bool {
+    true
 }
 
 fn default_model() -> String {
@@ -750,7 +759,7 @@ pub fn get_default_settings() -> AppSettings {
     #[cfg(target_os = "windows")]
     let default_shortcut = "ctrl+space";
     #[cfg(target_os = "macos")]
-    let default_shortcut = "option+space";
+    let default_shortcut = "shift+fn";
     #[cfg(target_os = "linux")]
     let default_shortcut = "ctrl+space";
     #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
@@ -770,7 +779,7 @@ pub fn get_default_settings() -> AppSettings {
     #[cfg(target_os = "windows")]
     let default_post_process_shortcut = "ctrl+shift+space";
     #[cfg(target_os = "macos")]
-    let default_post_process_shortcut = "option+shift+space";
+    let default_post_process_shortcut = "ctrl+option+shift+space";
     #[cfg(target_os = "linux")]
     let default_post_process_shortcut = "ctrl+shift+space";
     #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
@@ -854,6 +863,7 @@ pub fn get_default_settings() -> AppSettings {
         extra_recording_buffer_ms: 0,
         vad_enabled: default_vad_enabled(),
         overlay_style: default_overlay_style(),
+        live_typing: default_live_typing(),
     }
 }
 

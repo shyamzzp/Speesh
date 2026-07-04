@@ -20,7 +20,10 @@ export const CustomWords: React.FC<CustomWordsProps> = React.memo(
 
     const handleAddWord = () => {
       const trimmedWord = newWord.trim();
-      const sanitizedWord = trimmedWord.replace(/[<>"'&]/g, "");
+      // Strip only HTML-unsafe angle/quote chars. Ampersand is intentionally
+      // kept so legit words like "R&D", "AT&T", "S&P" survive (React escapes on
+      // render anyway, so "&" is not an injection risk here).
+      const sanitizedWord = trimmedWord.replace(/[<>"']/g, "");
       if (
         sanitizedWord &&
         !sanitizedWord.includes(" ") &&
